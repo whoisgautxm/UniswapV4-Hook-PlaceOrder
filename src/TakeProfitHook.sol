@@ -8,6 +8,8 @@ import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 
 contract TakeProfitsHook is BaseHook, ERC1155 {
     using PoolIdLibrary for IPoolManager.PoolKey;
@@ -134,4 +136,43 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         IERC20(tokenToBeSoldContract).transfer(msg.sender, amountIn);
     }
     
+    function _handleSwap(
+        IPoolManager.PoolKey calldata key,
+        IPoolManager.SwapParams calldata params
+    ) external returns (BalannceDelta) {
+        BalanceDelta delta = poolManager.swap(key, params);
+
+        if (params.zeroForOne) {
+            if (delta.amount0() > 0) {
+                IERC20(Currency.unwrap(key.currency0)).transfer(
+                    address(poolManager),
+                    uint128(delta.amount0())
+                );
+                poolManager.settle(key,currency0);
+            }
+            if (delta.amount1() < 0) {
+                poolManager.take(
+                    key.currency1,
+                    address(this),
+                    uint128(-delta.amount1())
+                );
+            }
+        }else{
+            if (delta.amount1() > 0) {
+                IERC20(Currency.unwrap(key.currency1)).transfer(
+                    address(poolManager),
+                    uint128(delta.amount1())
+                );
+                poolManager.settle(key,currency1);
+            }
+            if (delta.amount0() < 0) {
+                poolManager.take(
+                    key.currency0,
+                    address(this),
+                    uint128(-delta.amount0())
+                );
+            }
+        }
+        return delta;
+    }
 }
