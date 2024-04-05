@@ -13,6 +13,10 @@ Foundry consists of:
 
 https://book.getfoundry.sh/
 
+## Resouces 
+
+https://learnweb3.io/lessons/uniswap-v4-hooks-create-a-fully-on-chain-take-profit-orders-hook-on-uniswap-v4/
+
 ## Usage
 
 ### Build
