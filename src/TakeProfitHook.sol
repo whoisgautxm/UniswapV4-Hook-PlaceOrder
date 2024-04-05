@@ -82,6 +82,56 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         return
             uint256(keccak256(abi.encodePacked(poolId, tickLower, zeroForOne)));
     }
+    // Core Utilities
+    function placeOrder(
+        IPoolManager.PoolKey calldata key,
+        int24 tick,
+        uint256 amountIn,
+        bool zeroForOne
+    ) external returns (int24) {
+        int24 tickLower = _getLowerTickLast(tick, key.tickSpacing);
+        takeProfitPositions[key.toId()][tickLower][zeroForOne] += int256(
+            amountIn
+        );
+        uint256 tokenId = getTokenId(key, tickLower, zeroForOne);
+        if (!tokenIdExists[tokenId]) {
+            tokenIdExists[tokenId] = true;
+            tokenIdData[tokenId] = TokenData(key, tickLower, zeroForOne);
+        }
+        _mint(msg.sender, tokenId, amountIn, "");
+        tokenIdTotalSupply[tokenId] += amountIn;
 
+        address tokenToBeSoldContract = zeroForOne
+            ? Currency.unwrap(key.currency0)
+            : Currency.unwrap(key.currency1);
+        IERC20(tokenToBeSoldContract).transferFrom(
+            msg.sender,
+            address(this),
+            amountIn
+        );
+        return tickLower;
+    }
+    function cancelOrder(
+        IPoolManager.PoolKey calldata key,
+        int24 tick,
+        bool zeroForOne
+    ) external {
+        int24 tickLower = _getLowerTickLast(tick, key.tickSpacing);
+        uint256 tokenId = getTokenId(key, tickLower, zeroForOne);
+        require(tokenIdExists[tokenId], "Token ID does not exist");
+        //balanceOf is an ERC1155 function that returns the balance of a given tokenId for a given address
+        uint256 amountIn = balanceOf(msg.sender, tokenId);
+        require(amountIn > 0, "No balance to cancel");
+        takeProfitPositions[key.toId()][tickLower][zeroForOne] -= int256(
+            amountIn
+        );
+        tokenIdTotalSupply[tokenId] -= amountIn;
+        tokenIdClaimable[tokenId] -= amountIn;
+        _burn(msg.sender, tokenId, amountIn);
+        address tokenToBeSoldContract = zeroForOne
+            ? Currency.unwrap(key.currency0)
+            : Currency.unwrap(key.currency1);
+        IERC20(tokenToBeSoldContract).transfer(msg.sender, amountIn);
+    }
     
 }
