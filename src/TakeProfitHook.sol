@@ -84,6 +84,7 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         return
             uint256(keccak256(abi.encodePacked(poolId, tickLower, zeroForOne)));
     }
+
     // Core Utilities
     function placeOrder(
         IPoolManager.PoolKey calldata key,
@@ -135,7 +136,31 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
             : Currency.unwrap(key.currency1);
         IERC20(tokenToBeSoldContract).transfer(msg.sender, amountIn);
     }
-    
+    function fillOrder(
+        IPoolManager.PoolKey calldata key,
+        int24 tick,
+        bool zeroForOne,
+        int256 amountIn
+    ) internal {
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: amountIn,
+            sqrtPriceLimitX96: zeroForOne
+                ? TickMath.getSqrtRatioAtTick(tick)
+                : TickMath.getSqrtRatioAtTick(tick + 1)
+        });
+        BalanceDelta delta = abi.decode(
+            poolManager.lock(
+                abi.encodeCall(this._handleSwap, (key, SwapParams))
+            )(BalanceDelta)
+        );
+        takeProfitPositions[key.toId()][tickLower][zeroForOne] -= amountIn;
+        uint256 tokenId = getTokenId(key, tickLower, zeroForOne);
+        uint256 amountOfTokensReceivedFromSwap = zeroForOne
+            ? uint256(int256(-delta.amount1()))
+            : uint256(int256(-delta.amount0()));
+        tokenIdClaimable[tokenId] += amountOfTokensReceivedFromSwap;
+    }
     function _handleSwap(
         IPoolManager.PoolKey calldata key,
         IPoolManager.SwapParams calldata params
@@ -148,7 +173,7 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
                     address(poolManager),
                     uint128(delta.amount0())
                 );
-                poolManager.settle(key,currency0);
+                poolManager.settle(key, currency0);
             }
             if (delta.amount1() < 0) {
                 poolManager.take(
@@ -157,13 +182,13 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
                     uint128(-delta.amount1())
                 );
             }
-        }else{
+        } else {
             if (delta.amount1() > 0) {
                 IERC20(Currency.unwrap(key.currency1)).transfer(
                     address(poolManager),
                     uint128(delta.amount1())
                 );
-                poolManager.settle(key,currency1);
+                poolManager.settle(key, currency1);
             }
             if (delta.amount0() < 0) {
                 poolManager.take(
