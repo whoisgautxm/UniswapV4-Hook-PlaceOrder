@@ -5,11 +5,12 @@ import {BaseHook} from "../lib/periphery-next/contracts/BaseHook.sol";
 import {ERC1155} from "openzeppelin-contracts/contracts/token/ERC1155/ERC1155.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/libraries/PoolId.sol";
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
+import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
 contract TakeProfitsHook is BaseHook, ERC1155 {
     using PoolIdLibrary for IPoolManager.PoolKey;
@@ -84,7 +85,45 @@ contract TakeProfitsHook is BaseHook, ERC1155 {
         return
             uint256(keccak256(abi.encodePacked(poolId, tickLower, zeroForOne)));
     }
+    function afterSwap(
+        address,
+        IPoolManager.PoolKey calldata key,
+        int24 tick,
+        bool zeroForOne,
+        int256 amountIn
+    ) external override poolManagerOnly returns(bytes4){
+        int24 lastTickLower = tickLowerLasts[key.toId()];
+        (, int24 currentTick,,,) = poolmanager.getSlot(key.toId());
 
+        int24 currentTickLower = _getLowerTickLast(currentTick, key.tickSpacing);
+
+        bool swapZeroForOne = !params.zeroForOne;
+        int256 swapAmountIn;
+
+        // Tick has increases i.e. price of Token0 has increased
+        if(lastTickLower < currentTickLower){
+            for(int24 tick = lastTickLower; tick < currentTickLower;){
+                swapAmountIn = takeProfitPositions[key.toId()][tick][swapZeroForOne];
+                if(swapAmountIn > 0){
+                    fillOrder(key, tick, swapZeroForOne, swapAmountIn);
+                }
+                tick += key.tickSpacing;
+            }
+        }
+        else{
+
+            for(int24 tick = lastTickLower; tick > currentTickLower;){
+                swapAmountIn = takeProfitPositions[key.toId()][tick][swapZeroForOne];
+                if(swapAmountIn > 0){
+                    fillOrder(key, tick, swapZeroForOne, swapAmountIn);
+                }
+                tick -= key.tickSpacing;
+            }
+        
+        }
+        tickLowerLasts[key.toId()] = currentTickLower;
+        return TakeProfitsHook.afterSwap.selector;
+    }
     // Core Utilities
     function placeOrder(
         IPoolManager.PoolKey calldata key,
